@@ -1501,39 +1501,10 @@ class FluxKontextLora:
             blank_tensor = blank_result_tuple[0] if blank_result_tuple and len(blank_result_tuple) > 0 else None
             return (blank_tensor, "")
         
-        # Check if prompt contains line breaks for concurrent processing
-        prompts = [p.strip() for p in prompt.split('\n') if p.strip()]
-        
-        if len(prompts) > 1:
-            print(f"Flux Kontext LoRA: Detected {len(prompts)} prompts, processing concurrently...")
-            return self._generate_concurrent(
-                prompts, image, image_url, aspect_ratio, guidance_scale, num_inference_steps,
-                num_images, safety_tolerance, output_format, sync_mode, seed,
-                enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
-                lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
-                lora_path_5, lora_scale_5
-            )
-        
-        # Single prompt processing (original logic)
-        return self._generate_single(
-            prompts[0] if prompts else prompt, image, image_url, aspect_ratio, guidance_scale,
-            num_inference_steps, num_images, safety_tolerance, output_format,
-            sync_mode, seed, enable_safety_checker, lora_path_1, lora_scale_1,
-            lora_path_2, lora_scale_2, lora_path_3, lora_scale_3, lora_path_4,
-            lora_scale_4, lora_path_5, lora_scale_5
-        )
-
-    def _generate_single(
-        self, prompt, image, image_url, aspect_ratio, guidance_scale, num_inference_steps,
-        num_images, safety_tolerance, output_format, sync_mode, seed,
-        enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
-        lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
-        lora_path_5, lora_scale_5
-    ):
-        # Determine image URL: prioritize image tensor over image_url
+        # Determine and prepare image URL once (optimization for multiple prompts)
         final_image_url = None
         if image is not None:
-            # Upload the input image tensor to get URL
+            # Upload the input image tensor to get URL - only once
             final_image_url = ImageUtils.upload_image(image)
             if not final_image_url:
                 model_name = "Flux Kontext LoRA"
@@ -1546,11 +1517,40 @@ class FluxKontextLora:
             model_name = "Flux Kontext LoRA"
             print(f"Error: No valid image input provided for {model_name}")
             return ResultProcessor.create_blank_image(), ""
+        
+        # Check if prompt contains line breaks for concurrent processing
+        prompts = [p.strip() for p in prompt.split('\n') if p.strip()]
+        
+        if len(prompts) > 1:
+            print(f"Flux Kontext LoRA: Detected {len(prompts)} prompts, processing concurrently...")
+            return self._generate_concurrent(
+                prompts, final_image_url, aspect_ratio, guidance_scale, num_inference_steps,
+                num_images, safety_tolerance, output_format, sync_mode, seed,
+                enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
+                lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
+                lora_path_5, lora_scale_5
+            )
+        
+        # Single prompt processing (original logic)
+        return self._generate_single(
+            prompts[0] if prompts else prompt, final_image_url, aspect_ratio, guidance_scale,
+            num_inference_steps, num_images, safety_tolerance, output_format,
+            sync_mode, seed, enable_safety_checker, lora_path_1, lora_scale_1,
+            lora_path_2, lora_scale_2, lora_path_3, lora_scale_3, lora_path_4,
+            lora_scale_4, lora_path_5, lora_scale_5
+        )
 
+    def _generate_single(
+        self, prompt, final_image_url, aspect_ratio, guidance_scale, num_inference_steps,
+        num_images, safety_tolerance, output_format, sync_mode, seed,
+        enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
+        lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
+        lora_path_5, lora_scale_5
+    ):
         endpoint = "fal-ai/flux-kontext-lora"
 
         arguments = {
-            "prompt": prompt,
+            "prompt": "Show up in photos" + prompt,
             "image_url": final_image_url,
             "guidance_scale": guidance_scale,
             "num_inference_steps": num_inference_steps,
@@ -1616,7 +1616,7 @@ class FluxKontextLora:
             return (error_tensor, "")
 
     def _generate_concurrent(
-        self, prompts, image, image_url, aspect_ratio, guidance_scale, num_inference_steps,
+        self, prompts, final_image_url, aspect_ratio, guidance_scale, num_inference_steps,
         num_images, safety_tolerance, output_format, sync_mode, seed,
         enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
         lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
@@ -1626,7 +1626,7 @@ class FluxKontextLora:
         def process_single_prompt(prompt_data):
             prompt, prompt_seed = prompt_data
             return self._generate_single(
-                prompt, image, image_url, aspect_ratio, guidance_scale, num_inference_steps,
+                prompt, final_image_url, aspect_ratio, guidance_scale, num_inference_steps,
                 num_images, safety_tolerance, output_format, sync_mode, prompt_seed,
                 enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
                 lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
