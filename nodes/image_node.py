@@ -1434,7 +1434,7 @@ class FluxKontextLora:
                 "output_format": (["jpeg", "png"], {"default": "jpeg"}),
                 "sync_mode": ("BOOLEAN", {"default": False}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2**32 - 1}),
-                "enable_safety_checker": ("BOOLEAN", {"default": True}),
+                "enable_safety_checker": ("BOOLEAN", {"default": False}),
                 "lora_path_1": ("STRING", {"default": ""}),
                 "lora_scale_1": (
                     "FLOAT",
