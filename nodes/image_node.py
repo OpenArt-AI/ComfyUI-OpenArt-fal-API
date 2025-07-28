@@ -1,4 +1,7 @@
 from .fal_utils import ApiHandler, ImageUtils, ResultProcessor
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import torch
 
 
 # Remove all the configuration code since it's now handled by FalConfig
@@ -1397,6 +1400,254 @@ class SeedEditV3:
             return ApiHandler.handle_image_generation_error(model_name, e)
 
 
+class FluxKontextLora:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"default": "", "multiline": True}),
+                "image": ("IMAGE",),
+            },
+            "optional": {
+                "aspect_ratio": (
+                    [
+                        None,
+                        "21:9",
+                        "16:9",
+                        "4:3",
+                        "3:2",
+                        "1:1",
+                        "2:3",
+                        "3:4",
+                        "9:16",
+                        "9:21",
+                    ],
+                    {"default": None},
+                ),
+                "guidance_scale": (
+                    "FLOAT",
+                    {"default": 2.5, "min": 1.0, "max": 20.0, "step": 0.1},
+                ),
+                "num_inference_steps": ("INT", {"default": 30, "min": 1, "max": 50}),
+                "num_images": ("INT", {"default": 1, "min": 1, "max": 4}),
+                "safety_tolerance": (["1", "2", "3", "4", "5", "6"], {"default": "2"}),
+                "output_format": (["jpeg", "png"], {"default": "jpeg"}),
+                "sync_mode": ("BOOLEAN", {"default": False}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2**32 - 1}),
+                "enable_safety_checker": ("BOOLEAN", {"default": True}),
+                "lora_path_1": ("STRING", {"default": ""}),
+                "lora_scale_1": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+                "lora_path_2": ("STRING", {"default": ""}),
+                "lora_scale_2": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+                "lora_path_3": ("STRING", {"default": ""}),
+                "lora_scale_3": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+                "lora_path_4": ("STRING", {"default": ""}),
+                "lora_scale_4": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+                "lora_path_5": ("STRING", {"default": ""}),
+                "lora_scale_5": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "generate_image"
+    CATEGORY = "FAL/Image"
+
+    def generate_image(
+        self,
+        prompt,
+        image,
+        aspect_ratio=None,
+        guidance_scale=3.5,
+        num_inference_steps=28,
+        num_images=1,
+        safety_tolerance="2",
+        output_format="jpeg",
+        sync_mode=False,
+        seed=0,
+        enable_safety_checker=True,
+        lora_path_1="",
+        lora_scale_1=1.0,
+        lora_path_2="",
+        lora_scale_2=1.0,
+        lora_path_3="",
+        lora_scale_3=1.0,
+        lora_path_4="",
+        lora_scale_4=1.0,
+        lora_path_5="",
+        lora_scale_5=1.0,
+    ):
+        # Check if prompt contains line breaks for concurrent processing
+        prompts = [p.strip() for p in prompt.split('\n') if p.strip()]
+        
+        if len(prompts) > 1:
+            print(f"Flux Kontext LoRA: Detected {len(prompts)} prompts, processing concurrently...")
+            return self._generate_concurrent(
+                prompts, image, aspect_ratio, guidance_scale, num_inference_steps,
+                num_images, safety_tolerance, output_format, sync_mode, seed,
+                enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
+                lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
+                lora_path_5, lora_scale_5
+            )
+        
+        # Single prompt processing (original logic)
+        return self._generate_single(
+            prompts[0] if prompts else prompt, image, aspect_ratio, guidance_scale,
+            num_inference_steps, num_images, safety_tolerance, output_format,
+            sync_mode, seed, enable_safety_checker, lora_path_1, lora_scale_1,
+            lora_path_2, lora_scale_2, lora_path_3, lora_scale_3, lora_path_4,
+            lora_scale_4, lora_path_5, lora_scale_5
+        )
+
+    def _generate_single(
+        self, prompt, image, aspect_ratio, guidance_scale, num_inference_steps,
+        num_images, safety_tolerance, output_format, sync_mode, seed,
+        enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
+        lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
+        lora_path_5, lora_scale_5
+    ):
+        # Upload the input image to get URL
+        image_url = ImageUtils.upload_image(image)
+        if not image_url:
+            model_name = "Flux Kontext LoRA"
+            print(f"Error: Failed to upload image for {model_name}")
+            return ResultProcessor.create_blank_image()
+
+        endpoint = "fal-ai/flux-kontext-lora"
+
+        arguments = {
+            "prompt": prompt,
+            "image_url": image_url,
+            "guidance_scale": guidance_scale,
+            "num_inference_steps": num_inference_steps,
+            "num_images": num_images,
+            "safety_tolerance": safety_tolerance,
+            "output_format": output_format,
+            "sync_mode": sync_mode,
+            "enable_safety_checker": enable_safety_checker,
+        }
+
+        # Add aspect_ratio if specified
+        if aspect_ratio is not None:
+            arguments["aspect_ratio"] = aspect_ratio
+
+        # Add seed if specified
+        if seed > 0:
+            arguments["seed"] = seed
+
+        # Add LoRAs if provided
+        loras = []
+        lora_configs = [
+            (lora_path_1, lora_scale_1),
+            (lora_path_2, lora_scale_2),
+            (lora_path_3, lora_scale_3),
+            (lora_path_4, lora_scale_4),
+            (lora_path_5, lora_scale_5),
+        ]
+        
+        for lora_path, lora_scale in lora_configs:
+            if lora_path and lora_path.strip():
+                loras.append({
+                    "path": lora_path.strip(),
+                    "scale": lora_scale
+                })
+        
+        if loras:
+            arguments["loras"] = loras
+
+        try:
+            result = ApiHandler.submit_and_get_result(endpoint, arguments)
+            return ResultProcessor.process_image_result(result)
+        except Exception as e:
+            model_name = "Flux Kontext LoRA"
+            return ApiHandler.handle_image_generation_error(model_name, e)
+
+    def _generate_concurrent(
+        self, prompts, image, aspect_ratio, guidance_scale, num_inference_steps,
+        num_images, safety_tolerance, output_format, sync_mode, seed,
+        enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
+        lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
+        lora_path_5, lora_scale_5
+    ):
+        """Handle concurrent processing of multiple prompts"""
+        def process_single_prompt(prompt_data):
+            prompt, prompt_seed = prompt_data
+            return self._generate_single(
+                prompt, image, aspect_ratio, guidance_scale, num_inference_steps,
+                num_images, safety_tolerance, output_format, sync_mode, prompt_seed,
+                enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
+                lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
+                lora_path_5, lora_scale_5
+            )
+        
+        # Prepare prompts with individual seeds if seed is specified
+        prompt_data_list = []
+        for i, prompt in enumerate(prompts):
+            if seed > 0:
+                # Generate different seeds for each prompt
+                prompt_seed = seed + i
+            else:
+                prompt_seed = 0
+            prompt_data_list.append((prompt, prompt_seed))
+        
+        # Execute concurrent requests
+        all_results = []
+        try:
+            with ThreadPoolExecutor(max_workers=min(len(prompts), 5)) as executor:
+                # Submit all tasks
+                future_to_prompt = {
+                    executor.submit(process_single_prompt, data): data[0] 
+                    for data in prompt_data_list
+                }
+                
+                # Collect results as they complete
+                for future in as_completed(future_to_prompt):
+                    prompt = future_to_prompt[future]
+                    try:
+                        result = future.result()
+                        if result and len(result) > 0:
+                            all_results.append(result[0])  # Get the tensor from tuple
+                        print(f"Flux Kontext LoRA: Completed prompt '{prompt[:50]}...'")
+                    except Exception as e:
+                        print(f"Flux Kontext LoRA: Error processing prompt '{prompt[:50]}...': {e}")
+                        # Add a blank image for failed requests to maintain consistency
+                        blank_result = ResultProcessor.create_blank_image()
+                        if blank_result and len(blank_result) > 0:
+                            all_results.append(blank_result[0])
+            
+            if not all_results:
+                print("Flux Kontext LoRA: No successful results from concurrent processing")
+                return ResultProcessor.create_blank_image()
+            
+            # Combine all results into a single tensor batch
+            try:
+                combined_tensor = torch.cat(all_results, dim=0)
+                print(f"Flux Kontext LoRA: Successfully combined {len(all_results)} results")
+                return (combined_tensor,)
+            except Exception as e:
+                print(f"Flux Kontext LoRA: Error combining results: {e}")
+                # Return the first successful result if combining fails
+                return (all_results[0],)
+                
+        except Exception as e:
+            print(f"Flux Kontext LoRA: Error in concurrent processing: {e}")
+            return ResultProcessor.create_blank_image()
+
+
 # Node class mappings
 NODE_CLASS_MAPPINGS = {
     "Ideogramv3_fal": Ideogramv3,
@@ -1415,6 +1666,7 @@ NODE_CLASS_MAPPINGS = {
     "FluxProKontextTextToImage_fal": FluxProKontextTextToImage,
     "Imagen4Preview_fal": Imagen4PreviewNode,
     "SeedEditV3_fal": SeedEditV3,
+    "FluxKontextLora_fal": FluxKontextLora,
 }
 
 
@@ -1436,4 +1688,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FluxProKontextTextToImage_fal": "Flux Pro Kontext Text-to-Image (fal)",
     "Imagen4Preview_fal": "Imagen4 Preview (fal)",
     "SeedEditV3_fal": "SeedEdit 3.0 (fal)",
+    "FluxKontextLora_fal": "Flux Kontext LoRA (fal)",
 }
