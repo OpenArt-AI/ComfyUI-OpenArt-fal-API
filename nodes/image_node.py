@@ -1550,7 +1550,7 @@ class FluxKontextLora:
         endpoint = "fal-ai/flux-kontext-lora"
 
         arguments = {
-            "prompt": "Show up in photos" + prompt,
+            "prompt": prompt,
             "image_url": final_image_url,
             "guidance_scale": guidance_scale,
             "num_inference_steps": num_inference_steps,
