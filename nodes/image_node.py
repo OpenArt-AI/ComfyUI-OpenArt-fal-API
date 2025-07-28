@@ -1406,9 +1406,10 @@ class FluxKontextLora:
         return {
             "required": {
                 "prompt": ("STRING", {"default": "", "multiline": True}),
-                "image": ("IMAGE",),
             },
             "optional": {
+                "image": ("IMAGE",),
+                "image_url": ("STRING", {"default": "", "multiline": False}),
                 "aspect_ratio": (
                     [
                         None,
@@ -1463,23 +1464,25 @@ class FluxKontextLora:
             },
         }
 
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("images", "urls")
     FUNCTION = "generate_image"
     CATEGORY = "FAL/Image"
 
     def generate_image(
         self,
         prompt,
-        image,
+        image=None,
+        image_url="",
         aspect_ratio=None,
-        guidance_scale=3.5,
-        num_inference_steps=28,
+        guidance_scale=2.5,
+        num_inference_steps=30,
         num_images=1,
         safety_tolerance="2",
         output_format="jpeg",
         sync_mode=False,
         seed=0,
-        enable_safety_checker=True,
+        enable_safety_checker=False,
         lora_path_1="",
         lora_scale_1=1.0,
         lora_path_2="",
@@ -1491,13 +1494,20 @@ class FluxKontextLora:
         lora_path_5="",
         lora_scale_5=1.0,
     ):
+        # Validate input: either image tensor or image_url must be provided
+        if image is None and not image_url.strip():
+            print("Flux Kontext LoRA: Error - Either image tensor or image_url must be provided")
+            blank_result_tuple = ResultProcessor.create_blank_image()
+            blank_tensor = blank_result_tuple[0] if blank_result_tuple and len(blank_result_tuple) > 0 else None
+            return (blank_tensor, "")
+        
         # Check if prompt contains line breaks for concurrent processing
         prompts = [p.strip() for p in prompt.split('\n') if p.strip()]
         
         if len(prompts) > 1:
             print(f"Flux Kontext LoRA: Detected {len(prompts)} prompts, processing concurrently...")
             return self._generate_concurrent(
-                prompts, image, aspect_ratio, guidance_scale, num_inference_steps,
+                prompts, image, image_url, aspect_ratio, guidance_scale, num_inference_steps,
                 num_images, safety_tolerance, output_format, sync_mode, seed,
                 enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
                 lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
@@ -1506,7 +1516,7 @@ class FluxKontextLora:
         
         # Single prompt processing (original logic)
         return self._generate_single(
-            prompts[0] if prompts else prompt, image, aspect_ratio, guidance_scale,
+            prompts[0] if prompts else prompt, image, image_url, aspect_ratio, guidance_scale,
             num_inference_steps, num_images, safety_tolerance, output_format,
             sync_mode, seed, enable_safety_checker, lora_path_1, lora_scale_1,
             lora_path_2, lora_scale_2, lora_path_3, lora_scale_3, lora_path_4,
@@ -1514,24 +1524,34 @@ class FluxKontextLora:
         )
 
     def _generate_single(
-        self, prompt, image, aspect_ratio, guidance_scale, num_inference_steps,
+        self, prompt, image, image_url, aspect_ratio, guidance_scale, num_inference_steps,
         num_images, safety_tolerance, output_format, sync_mode, seed,
         enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
         lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
         lora_path_5, lora_scale_5
     ):
-        # Upload the input image to get URL
-        image_url = ImageUtils.upload_image(image)
-        if not image_url:
+        # Determine image URL: prioritize image tensor over image_url
+        final_image_url = None
+        if image is not None:
+            # Upload the input image tensor to get URL
+            final_image_url = ImageUtils.upload_image(image)
+            if not final_image_url:
+                model_name = "Flux Kontext LoRA"
+                print(f"Error: Failed to upload image tensor for {model_name}")
+                return ResultProcessor.create_blank_image(), ""
+        elif image_url.strip():
+            # Use provided image URL
+            final_image_url = image_url.strip()
+        else:
             model_name = "Flux Kontext LoRA"
-            print(f"Error: Failed to upload image for {model_name}")
-            return ResultProcessor.create_blank_image()
+            print(f"Error: No valid image input provided for {model_name}")
+            return ResultProcessor.create_blank_image(), ""
 
         endpoint = "fal-ai/flux-kontext-lora"
 
         arguments = {
             "prompt": prompt,
-            "image_url": image_url,
+            "image_url": final_image_url,
             "guidance_scale": guidance_scale,
             "num_inference_steps": num_inference_steps,
             "num_images": num_images,
@@ -1571,13 +1591,32 @@ class FluxKontextLora:
 
         try:
             result = ApiHandler.submit_and_get_result(endpoint, arguments)
-            return ResultProcessor.process_image_result(result)
+            image_tensor_tuple = ResultProcessor.process_image_result(result)
+            
+            # Extract the actual tensor from the tuple
+            image_tensor = image_tensor_tuple[0] if image_tensor_tuple and len(image_tensor_tuple) > 0 else None
+            
+            # Extract URLs from the result
+            result_urls = []
+            if result and "images" in result:
+                for img in result["images"]:
+                    if "url" in img:
+                        result_urls.append(img["url"])
+            
+            # Convert URLs list to comma-separated string
+            urls_string = ",".join(result_urls) if result_urls else ""
+            print('urls_string', urls_string)
+            print('image_tensor type:', type(image_tensor))
+            print('urls_string type:', type(urls_string))
+            return (image_tensor, urls_string)
         except Exception as e:
             model_name = "Flux Kontext LoRA"
-            return ApiHandler.handle_image_generation_error(model_name, e)
+            error_result_tuple = ApiHandler.handle_image_generation_error(model_name, e)
+            error_tensor = error_result_tuple[0] if error_result_tuple and len(error_result_tuple) > 0 else None
+            return (error_tensor, "")
 
     def _generate_concurrent(
-        self, prompts, image, aspect_ratio, guidance_scale, num_inference_steps,
+        self, prompts, image, image_url, aspect_ratio, guidance_scale, num_inference_steps,
         num_images, safety_tolerance, output_format, sync_mode, seed,
         enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
         lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
@@ -1587,7 +1626,7 @@ class FluxKontextLora:
         def process_single_prompt(prompt_data):
             prompt, prompt_seed = prompt_data
             return self._generate_single(
-                prompt, image, aspect_ratio, guidance_scale, num_inference_steps,
+                prompt, image, image_url, aspect_ratio, guidance_scale, num_inference_steps,
                 num_images, safety_tolerance, output_format, sync_mode, prompt_seed,
                 enable_safety_checker, lora_path_1, lora_scale_1, lora_path_2,
                 lora_scale_2, lora_path_3, lora_scale_3, lora_path_4, lora_scale_4,
@@ -1606,8 +1645,9 @@ class FluxKontextLora:
         
         # Execute concurrent requests
         all_results = []
+        all_urls = []
         try:
-            with ThreadPoolExecutor(max_workers=min(len(prompts), 5)) as executor:
+            with ThreadPoolExecutor(max_workers=min(len(prompts), 50)) as executor:
                 # Submit all tasks
                 future_to_prompt = {
                     executor.submit(process_single_prompt, data): data[0] 
@@ -1618,34 +1658,41 @@ class FluxKontextLora:
                 for future in as_completed(future_to_prompt):
                     prompt = future_to_prompt[future]
                     try:
-                        result = future.result()
-                        if result and len(result) > 0:
-                            all_results.append(result[0])  # Get the tensor from tuple
+                        tensor, url = future.result()  # Now expecting (tensor, url) tuple
+                        if tensor is not None:
+                            all_results.append(tensor)  # Store the tensor directly
+                            all_urls.append(url)  # Store the URL
                         print(f"Flux Kontext LoRA: Completed prompt '{prompt[:50]}...'")
                     except Exception as e:
                         print(f"Flux Kontext LoRA: Error processing prompt '{prompt[:50]}...': {e}")
                         # Add a blank image for failed requests to maintain consistency
-                        blank_result = ResultProcessor.create_blank_image()
-                        if blank_result and len(blank_result) > 0:
-                            all_results.append(blank_result[0])
+                        blank_result_tuple = ResultProcessor.create_blank_image()
+                        if blank_result_tuple and len(blank_result_tuple) > 0:
+                            all_results.append(blank_result_tuple[0])
+                            all_urls.append("")  # Empty URL for failed request
             
             if not all_results:
                 print("Flux Kontext LoRA: No successful results from concurrent processing")
-                return ResultProcessor.create_blank_image()
+                blank_result_tuple = ResultProcessor.create_blank_image()
+                blank_tensor = blank_result_tuple[0] if blank_result_tuple and len(blank_result_tuple) > 0 else None
+                return (blank_tensor, "")
             
             # Combine all results into a single tensor batch
             try:
                 combined_tensor = torch.cat(all_results, dim=0)
+                combined_urls = ",".join(filter(None, all_urls))  # Filter out empty URLs
                 print(f"Flux Kontext LoRA: Successfully combined {len(all_results)} results")
-                return (combined_tensor,)
+                return (combined_tensor, combined_urls)
             except Exception as e:
                 print(f"Flux Kontext LoRA: Error combining results: {e}")
                 # Return the first successful result if combining fails
-                return (all_results[0],)
+                return (all_results[0], all_urls[0] if all_urls else "")
                 
         except Exception as e:
             print(f"Flux Kontext LoRA: Error in concurrent processing: {e}")
-            return ResultProcessor.create_blank_image()
+            blank_result_tuple = ResultProcessor.create_blank_image()
+            blank_tensor = blank_result_tuple[0] if blank_result_tuple and len(blank_result_tuple) > 0 else None
+            return (blank_tensor, "")
 
 
 # Node class mappings
