@@ -1695,6 +1695,132 @@ class FluxKontextLora:
             return (blank_tensor, "")
 
 
+class FluxFill:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"default": "", "multiline": True}),
+                "image": ("IMAGE",),
+                "mask_image": ("IMAGE",),
+                "num_inference_steps": ("INT", {"default": 28, "min": 1, "max": 50}),
+                "guidance_scale": (
+                    "FLOAT",
+                    {"default": 30, "min": 28, "max": 35, "step": 1},
+                ),
+                "num_images": ("INT", {"default": 1, "min": 1, "max": 4}),
+                "enable_safety_checker": ("BOOLEAN", {"default": True}),
+            },
+            "optional": {
+                "seed": ("INT", {"default": -1}),
+                "output_format": (["png", "jpeg"], {"default": "png"}),
+                "lora_path_1": ("STRING", {"default": ""}),
+                "lora_scale_1": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+                "lora_path_2": ("STRING", {"default": ""}),
+                "lora_scale_2": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+                "lora_path_3": ("STRING", {"default": ""}),
+                "lora_scale_3": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+                "lora_path_4": ("STRING", {"default": ""}),
+                "lora_scale_4": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+                "lora_path_5": ("STRING", {"default": ""}),
+                "lora_scale_5": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "generate_image"
+    CATEGORY = "FAL/Image"
+
+    def generate_image(
+        self,
+        prompt,
+        image,
+        mask_image,
+        num_inference_steps,
+        guidance_scale,
+        num_images,
+        enable_safety_checker,
+        seed=-1,
+        output_format="png",
+        lora_path_1="",
+        lora_scale_1=1.0,
+        lora_path_2="",
+        lora_scale_2=1.0,
+        lora_path_3="",
+        lora_scale_3=1.0,
+        lora_path_4="",
+        lora_scale_4=1.0,
+        lora_path_5="",
+        lora_scale_5=1.0,
+    ):
+        try:
+            # Upload images to FAL
+            image_url = ImageUtils.upload_image(image)
+            mask_image_url = ImageUtils.upload_image(mask_image)
+            
+            if not image_url or not mask_image_url:
+                print("FluxFill: Error uploading images")
+                return ResultProcessor.create_blank_image()
+
+            print(f"FluxFill: Uploaded target image. URL: {image_url}")
+            print(f"FluxFill: Uploaded mask image. URL: {mask_image_url}")
+
+            # Prepare arguments
+            arguments = {
+                "prompt": prompt,
+                "image_url": image_url,
+                "mask_url": mask_image_url,
+                "num_inference_steps": num_inference_steps,
+                "guidance_scale": guidance_scale,
+                "num_images": num_images,
+                "enable_safety_checker": enable_safety_checker,
+                "output_format": output_format,
+            }
+
+            if seed != -1:
+                arguments["seed"] = seed
+
+            # Collect all provided LoRA configurations
+            loras = []
+            lora_configs = [
+                (lora_path_1, lora_scale_1),
+                (lora_path_2, lora_scale_2),
+                (lora_path_3, lora_scale_3),
+                (lora_path_4, lora_scale_4),
+                (lora_path_5, lora_scale_5),
+            ]
+            
+            for lora_path, lora_scale in lora_configs:
+                if lora_path.strip():
+                    loras.append({"path": lora_path, "scale": lora_scale})
+            
+            if loras:
+                arguments["loras"] = loras
+                print(f"FluxFill: Using {len(loras)} LoRA(s)")
+
+            # Submit to FAL API
+            result = ApiHandler.submit_and_get_result("fal-ai/flux-lora-fill", arguments)
+            return ResultProcessor.process_image_result(result)
+            
+        except Exception as e:
+            return ApiHandler.handle_image_generation_error("FluxFill", e)
+
+
 # Node class mappings
 NODE_CLASS_MAPPINGS = {
     "Ideogramv3_fal": Ideogramv3,
@@ -1714,6 +1840,7 @@ NODE_CLASS_MAPPINGS = {
     "Imagen4Preview_fal": Imagen4PreviewNode,
     "SeedEditV3_fal": SeedEditV3,
     "FluxKontextLora_fal": FluxKontextLora,
+    "FluxFill_fal": FluxFill,
 }
 
 
@@ -1736,4 +1863,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Imagen4Preview_fal": "Imagen4 Preview (fal)",
     "SeedEditV3_fal": "SeedEdit 3.0 (fal)",
     "FluxKontextLora_fal": "Flux Kontext LoRA (fal)",
+    "FluxFill_fal": "Flux Fill (fal)",
 }
