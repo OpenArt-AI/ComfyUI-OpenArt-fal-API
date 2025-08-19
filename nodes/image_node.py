@@ -1695,6 +1695,155 @@ class FluxKontextLora:
             return (blank_tensor, "")
 
 
+class FluxKontextLoraTextToImage:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"default": "", "multiline": True}),
+            },
+            "optional": {
+                "image_size": (
+                    [
+                        "square",
+                        "square_hd", 
+                        "portrait_3_4",
+                        "portrait_9_16",
+                        "landscape_4_3",
+                        "landscape_16_9",
+                        "custom",
+                    ],
+                    {"default": "square"},
+                ),
+                "width": (
+                    "INT",
+                    {"default": 512, "min": 256, "max": 2048, "step": 16},
+                ),
+                "height": (
+                    "INT", 
+                    {"default": 512, "min": 256, "max": 2048, "step": 16},
+                ),
+                "guidance_scale": (
+                    "FLOAT",
+                    {"default": 2.5, "min": 1.0, "max": 20.0, "step": 0.1},
+                ),
+                "num_inference_steps": ("INT", {"default": 30, "min": 1, "max": 50}),
+                "num_images": ("INT", {"default": 1, "min": 1, "max": 4}),
+                "output_format": (["jpeg", "png"], {"default": "jpeg"}),
+                "sync_mode": ("BOOLEAN", {"default": False}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2**32 - 1}),
+                "enable_safety_checker": ("BOOLEAN", {"default": False}),
+                "lora_path_1": ("STRING", {"default": ""}),
+                "lora_scale_1": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+                "lora_path_2": ("STRING", {"default": ""}),
+                "lora_scale_2": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+                "lora_path_3": ("STRING", {"default": ""}),
+                "lora_scale_3": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+                "lora_path_4": ("STRING", {"default": ""}),
+                "lora_scale_4": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+                "lora_path_5": ("STRING", {"default": ""}),
+                "lora_scale_5": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05},
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "generate_image"
+    CATEGORY = "FAL/Image"
+
+    def generate_image(
+        self,
+        prompt,
+        image_size="square",
+        width=512,
+        height=512,
+        guidance_scale=2.5,
+        num_inference_steps=30,
+        num_images=1,
+        output_format="jpeg",
+        sync_mode=False,
+        seed=0,
+        enable_safety_checker=False,
+        lora_path_1="",
+        lora_scale_1=1.0,
+        lora_path_2="",
+        lora_scale_2=1.0,
+        lora_path_3="",
+        lora_scale_3=1.0,
+        lora_path_4="",
+        lora_scale_4=1.0,
+        lora_path_5="",
+        lora_scale_5=1.0,
+    ):
+        endpoint = "fal-ai/flux-kontext-lora/text-to-image"
+
+        arguments = {
+            "prompt": prompt,
+            "guidance_scale": guidance_scale,
+            "num_inference_steps": num_inference_steps,
+            "num_images": num_images,
+            "output_format": output_format,
+            "sync_mode": sync_mode,
+            "enable_safety_checker": enable_safety_checker,
+        }
+
+        # Add image_size - use custom dimensions or preset
+        if image_size == "custom":
+            arguments["image_size"] = {"width": width, "height": height}
+        else:
+            arguments["image_size"] = image_size
+
+        # Add seed if specified
+        if seed > 0:
+            arguments["seed"] = seed
+
+        # Add LoRAs if provided
+        loras = []
+        lora_configs = [
+            (lora_path_1, lora_scale_1),
+            (lora_path_2, lora_scale_2),
+            (lora_path_3, lora_scale_3),
+            (lora_path_4, lora_scale_4),
+            (lora_path_5, lora_scale_5),
+        ]
+        
+        for lora_path, lora_scale in lora_configs:
+            if lora_path and lora_path.strip():
+                # Ensure scale is a valid float, use 1.0 as default if invalid
+                try:
+                    scale_value = float(lora_scale) if lora_scale is not None else 1.0
+                except (ValueError, TypeError):
+                    scale_value = 1.0
+                
+                loras.append({
+                    "path": lora_path.strip(),
+                    "scale": scale_value
+                })
+        
+        if loras:
+            arguments["loras"] = loras
+
+        try:
+            result = ApiHandler.submit_and_get_result(endpoint, arguments)
+            return ResultProcessor.process_image_result(result)
+        except Exception as e:
+            return ApiHandler.handle_image_generation_error("Flux Kontext LoRA Text-to-Image", e)
+
+
 class FluxFill:
     @classmethod
     def INPUT_TYPES(cls):
@@ -1840,6 +1989,7 @@ NODE_CLASS_MAPPINGS = {
     "Imagen4Preview_fal": Imagen4PreviewNode,
     "SeedEditV3_fal": SeedEditV3,
     "FluxKontextLora_fal": FluxKontextLora,
+    "FluxKontextLoraTextToImage_fal": FluxKontextLoraTextToImage,
     "FluxFill_fal": FluxFill,
 }
 
@@ -1863,5 +2013,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Imagen4Preview_fal": "Imagen4 Preview (fal)",
     "SeedEditV3_fal": "SeedEdit 3.0 (fal)",
     "FluxKontextLora_fal": "Flux Kontext LoRA (fal)",
+    "FluxKontextLoraTextToImage_fal": "Flux Kontext LoRA Text-to-Image (fal)",
     "FluxFill_fal": "Flux Fill (fal)",
 }
